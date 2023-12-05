@@ -1,0 +1,9 @@
+[package]
+name = "streaming-speech-classifier"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+rust-bert = "0.21.0"
+rust_tokenizers = "8.1.1"
+tch = "0.13.0"
