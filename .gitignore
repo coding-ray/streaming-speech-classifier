@@ -16,3 +16,9 @@ Cargo.lock
 
 # Added by cargo
 /target
+
+# Compiled binaries
+ssc*
+
+# VS Code
+.vscode
