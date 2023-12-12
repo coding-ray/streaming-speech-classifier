@@ -7,9 +7,10 @@ use rust_bert::{
     Config, RustBertError,
 };
 use rust_tokenizers::tokenizer::{DeBERTaTokenizer, MultiThreadedTokenizer, TruncationStrategy};
+use std::env;
 use tch::{nn, no_grad, Device, Kind, Tensor};
 
-fn main() -> Result<(), RustBertError> {
+fn predict(input: &String) -> Result<Tensor, RustBertError> {
     // resources paths
     let config_resource = Box::new(RemoteResource::from_pretrained(
         DebertaConfigResources::DEBERTA_BASE_MNLI,
@@ -40,12 +41,9 @@ fn main() -> Result<(), RustBertError> {
     let model = DebertaForSequenceClassification::new(vs.root(), &config)?;
     load_weights(&model_resource, &mut vs)?;
 
-    // define input
-    let input = [("I love you.", "I like you.")];
-
-    let tokenized_input = MultiThreadedTokenizer::encode_pair_list(
+    let tokenized_input = MultiThreadedTokenizer::encode_list(
         &tokenizer,
-        &input,
+        &[input],
         128,
         &TruncationStrategy::LongestFirst,
         0,
@@ -70,7 +68,21 @@ fn main() -> Result<(), RustBertError> {
     let model_output =
         no_grad(|| model.forward_t(Some(&input_tensor), None, None, None, None, false))?;
 
-    model_output.logits.softmax(-1, Kind::Float).print();
+    return Ok(model_output.logits.softmax(-1, Kind::Float));
+}
 
-    return Ok(());
+fn main() {
+    // define input
+    let argv: Vec<String> = env::args().collect();
+    let argc: usize = argv.len();
+    if argc == 1 || argc > 2 {
+        println!("{}", format!("Usage: {} \"Input sentence\"", argv[0]));
+        return; // FIXME: throw error
+    }
+    let input_sentence = &argv[1];
+
+    match predict(input_sentence) {
+        Ok(probabilities) => probabilities.print(),
+        Err(err) => panic!("{}", err),
+    }
 }
