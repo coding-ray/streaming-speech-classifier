@@ -80,15 +80,21 @@ fn predict(input: &String) -> Result<Vec<Label>, RustBertError> {
     return Ok(output[0].clone());
 }
 
+fn get_help_messages(name_current_executable: &String) -> String {
+    format!("Usage: {} \"Input sentence\"", name_current_executable)
+}
+
 fn main() {
     // define input
     let argv: Vec<String> = env::args().collect();
     let argc: usize = argv.len();
-    if argc == 1 || argc > 2 {
-        println!("{}", format!("Usage: {} \"Input sentence\"", argv[0]));
-        return; // FIXME: throw error
+    if argc == 1 {
+        println!("{}", get_help_messages(&argv[0]));
+        return;
+    } else if argc > 2 {
+        panic!("{}", get_help_messages(&argv[0]));
     }
-    let input_sentence = &argv[1];
+    let input_sentence: &String = &argv[1];
 
     match predict(input_sentence) {
         Ok(output_logits) => {
