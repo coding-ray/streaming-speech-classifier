@@ -8,7 +8,7 @@ Streaming Speech Classifier (SSC) is a time-critical pipeline that categorizes s
     git clone https://github.com/coding-ray/streaming-speech-classifier ssc
     cd ssc
     ```
-1. Install development dependencies. (Read-to-use binaries are planned.)
+1. Install development dependencies.
     ```
     ./bin/install-dev-deps.sh
     ```
@@ -16,7 +16,11 @@ Streaming Speech Classifier (SSC) is a time-critical pipeline that categorizes s
     ```
     ./bin/build-binaries.sh
     ```
-1. Check the result
+1. Check the result.
     ```
-    ./ssc
+    ./ssc "such a physics lecturer"
+    ```
+1. Measure the running time.
+    ```
+    time ./ssc "such a physics lecturer"
     ```

@@ -1,88 +1,108 @@
 use rust_bert::{
-    deberta::{
-        DebertaConfig, DebertaConfigResources, DebertaForSequenceClassification,
-        DebertaMergesResources, DebertaModelResources, DebertaVocabResources,
+    pipelines::{
+        common::{ModelResource, ModelType},
+        sequence_classification::Label,
+        zero_shot_classification::{ZeroShotClassificationConfig, ZeroShotClassificationModel},
     },
-    resources::{load_weights, RemoteResource, ResourceProvider},
-    Config, RustBertError,
+    resources::LocalResource,
+    RustBertError,
 };
-use rust_tokenizers::tokenizer::{DeBERTaTokenizer, MultiThreadedTokenizer, TruncationStrategy};
-use std::env;
-use tch::{nn, no_grad, Device, Kind, Tensor};
+use std::{env, path::PathBuf};
+use tch::Device;
 
-fn predict(input: &String) -> Result<Tensor, RustBertError> {
-    // resources paths
-    let config_resource = Box::new(RemoteResource::from_pretrained(
-        DebertaConfigResources::DEBERTA_BASE_MNLI,
-    ));
-    let vocab_resource = Box::new(RemoteResource::from_pretrained(
-        DebertaVocabResources::DEBERTA_BASE_MNLI,
-    ));
-    let merges_resource = Box::new(RemoteResource::from_pretrained(
-        DebertaMergesResources::DEBERTA_BASE_MNLI,
-    ));
-    let model_resource = Box::new(RemoteResource::from_pretrained(
-        DebertaModelResources::DEBERTA_BASE_MNLI,
-    ));
+const PATH_MODEL: &str = "src/model/rust_model.ot";
+const PATH_MODEL_MERGE_SCRIPT: &str = "bin/merge-model-parts.sh";
+const CATEGORIES: [&str; 2] = ["science", "politics"];
 
-    let config_path = config_resource.get_local_path()?;
-    let vocab_path = vocab_resource.get_local_path()?;
-    let merges_path = merges_resource.get_local_path()?;
+enum ResourceType {
+    Config,
+    Model,
+    Merges,
+    Vocab,
+}
+
+fn get_local_resource(resource_type: ResourceType, path_str: &str) -> Box<LocalResource> {
+    fn box_it(path_str: &str) -> Box<LocalResource> {
+        Box::new(LocalResource::from(PathBuf::from(path_str)))
+    }
+
+    fn get_or_generate_model_local_resource(path_str: &str) -> Box<LocalResource> {
+        let path = std::path::Path::new(path_str);
+        if path.exists() {
+            return box_it(path_str);
+        }
+
+        // merge model from model parts
+        std::process::Command::new(PATH_MODEL_MERGE_SCRIPT)
+            .spawn()
+            .expect(format!("Cannot execute {}.", PATH_MODEL_MERGE_SCRIPT).as_str())
+            .wait()
+            .expect("Cannot create the model from the model parts.");
+
+        if path.exists() {
+            return box_it(path_str);
+        } else {
+            panic!("Cannot find the model {}.", path_str);
+        }
+    }
+
+    match resource_type {
+        ResourceType::Model => return get_or_generate_model_local_resource(path_str),
+        ResourceType::Config | ResourceType::Merges | ResourceType::Vocab => {
+            return box_it(path_str)
+        }
+    }
+}
+
+fn predict(input: &String) -> Result<Vec<Label>, RustBertError> {
+    // resources
+    let model_resource = get_local_resource(ResourceType::Model, PATH_MODEL);
+    let config_resource = get_local_resource(ResourceType::Config, "src/config/main.json");
+    let vocab_resource = get_local_resource(ResourceType::Vocab, "src/config/vocab.json");
+    let merges_resource = get_local_resource(ResourceType::Merges, "src/config/merges.txt");
+    let device = Device::Cpu; // match LibTorch version
 
     // set up the model
-    let device = Device::Cpu;
-    let mut vs = nn::VarStore::new(device);
-    let tokenizer = DeBERTaTokenizer::from_file(
-        vocab_path.to_str().unwrap(),
-        merges_path.to_str().unwrap(),
-        false,
-    )?;
-    let config = DebertaConfig::from_file(config_path);
-    let model = DebertaForSequenceClassification::new(vs.root(), &config)?;
-    load_weights(&model_resource, &mut vs)?;
+    let complete_config = ZeroShotClassificationConfig {
+        model_type: ModelType::Deberta,
+        model_resource: ModelResource::Torch(model_resource),
+        config_resource,
+        vocab_resource: vocab_resource.clone(),
+        merges_resource: Some(merges_resource.clone()),
+        device,
+        ..Default::default()
+    };
+    let model = ZeroShotClassificationModel::new(complete_config)?;
 
-    let tokenized_input = MultiThreadedTokenizer::encode_list(
-        &tokenizer,
-        &[input],
-        128,
-        &TruncationStrategy::LongestFirst,
-        0,
-    );
-    let max_len = tokenized_input
-        .iter()
-        .map(|input| input.token_ids.len())
-        .max()
-        .unwrap();
-    let tokenized_input = tokenized_input
-        .iter()
-        .map(|input| input.token_ids.clone())
-        .map(|mut input| {
-            input.extend(vec![0; max_len - input.len()]);
-            input
-        })
-        .map(|input| Tensor::from_slice(&(input)))
-        .collect::<Vec<_>>();
-    let input_tensor = Tensor::stack(tokenized_input.as_slice(), 0).to(device);
+    // predict and return scores for the provided labels
+    let output: Vec<Vec<Label>> = model.predict_multilabel([input.as_str()], CATEGORIES, None, 128)?;
 
-    // forward pass
-    let model_output =
-        no_grad(|| model.forward_t(Some(&input_tensor), None, None, None, None, false))?;
+    return Ok(output[0].clone());
+}
 
-    return Ok(model_output.logits.softmax(-1, Kind::Float));
+fn get_help_messages(name_current_executable: &String) -> String {
+    format!("Usage: {} \"Input sentence\"", name_current_executable)
 }
 
 fn main() {
     // define input
     let argv: Vec<String> = env::args().collect();
     let argc: usize = argv.len();
-    if argc == 1 || argc > 2 {
-        println!("{}", format!("Usage: {} \"Input sentence\"", argv[0]));
-        return; // FIXME: throw error
+    if argc == 1 {
+        println!("{}", get_help_messages(&argv[0]));
+        return;
+    } else if argc > 2 {
+        panic!("{}", get_help_messages(&argv[0]));
     }
-    let input_sentence = &argv[1];
+    let input_sentence: &String = &argv[1];
 
     match predict(input_sentence) {
-        Ok(probabilities) => probabilities.print(),
+        Ok(output_logits) => {
+            println!("{:^10} {:^7}", "Category", "Score");
+            for logit in output_logits {
+                println!("{:^10} {:<7.4}", logit.text, logit.score);
+            }
+        }
         Err(err) => panic!("{}", err),
     }
 }

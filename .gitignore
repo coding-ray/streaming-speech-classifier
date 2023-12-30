@@ -22,3 +22,9 @@ ssc*
 
 # VS Code
 .vscode
+
+# Python venv
+**/.venv/**
+
+# model
+*.ot
