@@ -25,3 +25,6 @@ ssc*
 
 # Python venv
 **/.venv/**
+
+# model
+*.ot
