@@ -24,3 +24,4 @@ if [ -f "$TMP_PATH" ]; then
 fi
 wget -O "$TMP_PATH" "$MODEL_URL"
 mv "$TMP_PATH" "$OUTPUT_PATH"
+echo "Moved "$TMP_PATH" to "$OUTPUT_PATH""
