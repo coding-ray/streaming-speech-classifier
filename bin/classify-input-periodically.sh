@@ -48,7 +48,7 @@ load_content() {
   processing_input="$PENDING_DIR/$input"
   rm -f "$processing_input"
   mv "$INPUT_DIR/$input" "$processing_input"
-  rm -f "$INPUT_DIR/*" # in case of old input files
+  rm -rf $INPUT_DIR/* # in case of old input files
   file_content="$(cat $processing_input | tr "\n" " " | awk '$1=$1')"
   echo "Processing: $input"
   echo -e "Content: \"$file_content\""
